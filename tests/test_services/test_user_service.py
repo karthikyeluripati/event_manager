@@ -1,4 +1,6 @@
 import pytest
+import bcrypt
+from unittest.mock import patch, MagicMock
 from app.dependencies import get_settings
 from app.services.user_service import UserService
 from app.models.user_model import User
@@ -26,6 +28,19 @@ async def test_create_user_with_invalid_data(db_session):
     }
     user = await UserService.create(db_session, user_data)
     assert user is None
+
+# Test for creating a user with username already exists
+async def test_create_user_with_duplicate_username(db_session):
+    user_data = {
+        "username": "valid_user",
+        "email": "valid_user@example.com",
+        "password": "ValidPassword123!",
+    }
+    user = await UserService.create(db_session, user_data)
+    assert user is not None
+    user = await UserService.create(db_session, user_data)
+    assert user is None
+
 
 # Test for fetching a user by ID when the user exists
 async def test_get_by_id_user_exists(db_session, user):
@@ -69,6 +84,13 @@ async def test_update_user_valid_data(db_session, user):
 async def test_update_user_invalid_data(db_session, user):
     updated_user = await UserService.update(db_session, user.id, {"email": "invalidemail"})
     assert updated_user is None
+
+# Test for updating a user with profile picture url
+async def test_update_user_profile_picture_url(db_session, user):
+    profile_picture_url = "https://example.com/updated_profile_picture.jpg"
+    updated_user = await UserService.update(db_session, user.id, {"profile_picture_url": profile_picture_url})
+    assert updated_user is not None
+    assert updated_user.profile_picture_url == str(profile_picture_url)
 
 # Test for deleting a user who exists
 async def test_delete_user_exists(db_session, user):
@@ -138,6 +160,8 @@ async def test_account_lock_after_failed_logins(db_session, user):
     
     is_locked = await UserService.is_account_locked(db_session, user.username)
     assert is_locked, "The account should be locked after the maximum number of failed login attempts."
+    user = await UserService.login_user(db_session, user.username, "wrongpassword")
+    assert user is None
 
 # Test for resetting a user's password
 async def test_reset_password(db_session, user):
@@ -148,13 +172,46 @@ async def test_reset_password(db_session, user):
     reset_user = await UserService.reset_password(db_session, user.id, new_password)
     assert reset_user is not None
 
+# Test for resetting a user's password if user is locked
+async def test_reset_password_locked(db_session, user):
+    max_login_attempts = get_settings().max_login_attempts
+    for _ in range(max_login_attempts):
+        await UserService.login_user(db_session, user.username, "wrongpassword")
+    is_locked = await UserService.is_account_locked(db_session, user.username)
+    assert is_locked, "The account should be locked after the maximum number of failed login attempts."
+
+    new_password = "NewPassword123!"
+    reset_success = await UserService.reset_password(db_session, user.username, new_password)
+    assert reset_success is False
+
 # Test for verifying a user's email
 async def test_verify_email(db_session, user):
     updated_user = await UserService.verify_email(db_session, user.id)
     assert updated_user is True
+
+# Test for verifying a user's email if user does not exist
+async def test_verify_email_if_user_not_exist(db_session, user):
+    with patch('app.services.user_service.UserService.get_by_id') as mock_get_by_id:
+        mock_get_by_id.return_value = None
+        result = await UserService.verify_email(db_session, user.id)
+        assert result is False
 
 # Test for unlocking a user's account
 async def test_unlock_user_account(db_session, locked_user):
     await UserService.unlock_user_account(db_session, locked_user.id)
     is_locked = await UserService.is_account_locked(db_session, locked_user.username)
     assert not is_locked, "The account should be unlocked after calling unlock_user_account."
+    assert not is_locked, "The account should be unlocked after calling unlock_user_account."
+
+# Test for unlocking a user's account if user is not locked
+async def test_unlock_user_if_user_is_not_locked(db_session, user):
+    result = await UserService.unlock_user_account(db_session, user.id)
+    assert result is False
+
+# Test for count the number of users in the database
+async def test_count_users(db_session):
+    mock_count_result = 10
+    mock_execute_result = MagicMock(scalar=MagicMock(return_value=mock_count_result))
+    with patch.object(db_session, "execute", return_value=mock_execute_result):
+        count = await UserService.count(db_session)
+    assert count == mock_count_result
