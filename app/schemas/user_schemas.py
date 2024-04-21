@@ -36,6 +36,7 @@ Data Serialization and Deserialization: Pydantic handles the secure conversion o
 Overall, the use of Pydantic models in this file contributes to building a secure, validated, and well-documented API for user-related operations in a FastAPI application. The combination of type annotations, regex-based validators, and inheritance promotes code reusability, maintainability, and adherence to security best practices.
 """
 # Import required libraries and modules
+from typing import ClassVar
 from datetime import datetime, timezone  # Provides classes for manipulating dates and times in both simple and complex ways.
 from urllib.parse import urlparse  # Functions for breaking down and reconstructing URLs.
 from pydantic import BaseModel, EmailStr, Field, HttpUrl, validator  # Pydantic is used for data validation and settings management using Python type annotations.
@@ -56,6 +57,7 @@ class UserBase(BaseModel):
     )
     email: EmailStr = Field(
         ...,
+        max_length=255,
         description="The email address of the user.",
         example="john.doe@example.com"
     )
@@ -73,15 +75,21 @@ class UserBase(BaseModel):
     )
     profile_picture_url: Optional[str] = Field(
         None,
+        max_length=2083,
         description="The URL to the user's profile picture. Must point to a valid image file (e.g., JPEG, PNG).",
         example="https://example.com/profile_pictures/john_doe.jpg"
     )
 
     # Validators are used to validate the data
+    RESERVED_WORDS: ClassVar[list] = ['admin', 'root', 'superuser', 'moderator']
+
     @validator('username')
     def validate_username(cls, v):
         if not re.match(r"^[a-zA-Z0-9_-]+$", v):
             raise ValueError("Username can only contain letters, numbers, underscores, and hyphens.")
+        for reserved_word in cls.RESERVED_WORDS:
+                if reserved_word in v.lower():
+                    raise ValueError(f"Username cannot contain the reserved word: '{reserved_word}'.")
         return v
 
     @validator('full_name')
@@ -95,8 +103,15 @@ class UserBase(BaseModel):
         if v is None:
             return v  # If the URL is optional, allow None values
         parsed_url = urlparse(v)
+        if not parsed_url.scheme or parsed_url.scheme not in ['http', 'https']:
+            raise ValueError("Profile picture URL must start with 'http://' or 'https://'.")
+        if not parsed_url.netloc:
+            raise ValueError("Profile picture URL is missing the domain name.")
+        domain_pattern = r'^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.[a-zA-Z]{2,}$'
+        if not re.match(domain_pattern, parsed_url.netloc):
+            raise ValueError("Profile Picture URL must have a valid domain name.")
         if not re.search(r"\.(jpg|jpeg|png)$", parsed_url.path):
-            raise ValueError("Profile picture URL must point to a valid image file (JPEG, PNG).")
+            raise ValueError("Profile Picture URL must point to a valid image file (JPEG, PNG).")
         return v
 
     class Config:
@@ -106,7 +121,7 @@ class UserBase(BaseModel):
                 "username": "john_doe_123",
                 "email": "john.doe@example.com",
                 "full_name": "John Doe",
-                "bio": "I am a software engineer with over 5 years of experience in building scalable web applications using Python and JavaScript.",
+                "bio": "I am a data scientist passionate about machine learning and big data analytics.",
                 "profile_picture_url": "https://example.com/profile_pictures/john_doe.jpg"
             }
         }
@@ -124,6 +139,8 @@ class UserCreate(UserBase):
     def validate_password(cls, v):
         if len(v) < 8:
             raise ValueError("Password must be at least 8 characters long.")
+        if len(v) > 128:
+            raise ValueError("Password must be less than 128 characters long.")
         if not re.search(r"[A-Z]", v):
             raise ValueError("Password must contain at least one uppercase letter.")
         if not re.search(r"[a-z]", v):
@@ -132,6 +149,8 @@ class UserCreate(UserBase):
             raise ValueError("Password must contain at least one digit.")
         if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", v):
             raise ValueError("Password must contain at least one special character.")
+        if ' ' in v:
+            raise ValueError("Password must not contain spaces.")
         return v
 
     class Config:
@@ -142,7 +161,7 @@ class UserCreate(UserBase):
                 "email": "john.doe@example.com",
                 "password": "SecurePassword123!",
                 "full_name": "John Doe",
-                "bio": "I am a software engineer with over 5 years of experience in building scalable web applications using Python and JavaScript.",
+                "bio": "I am a data scientist passionate about machine learning and big data analytics.",
                 "profile_picture_url": "https://example.com/profile_pictures/john_doe.jpg"
             }
         }
@@ -151,6 +170,7 @@ class UserCreate(UserBase):
 class UserUpdate(BaseModel):
     email: Optional[EmailStr] = Field(
         None,
+        max_length=255,
         description="A new email address for the user.",
         example="john.doe.new@example.com"
     )
@@ -158,7 +178,7 @@ class UserUpdate(BaseModel):
         None,
         max_length=100,
         description="An updated full name for the user.",
-        example="John H. Doe"
+        example="John Update Doe"
     )
     bio: Optional[str] = Field(
         None,
@@ -168,16 +188,30 @@ class UserUpdate(BaseModel):
     )
     profile_picture_url: Optional[HttpUrl] = Field(
         None,
+        max_length=2083,
         description="An updated URL to the user's profile picture.",
         example="https://example.com/profile_pictures/john_doe_updated.jpg"
     )
+
+    @validator('full_name')
+    def validate_full_name(cls, v):
+        if v and not re.match(r"^[a-zA-Z\s'-]+$", v):
+            raise ValueError("Full name can only contain letters, spaces, hyphens, or apostrophes.")
+        return v
 
     @validator('profile_picture_url', pre=True, always=True)
     def validate_profile_picture_url(cls, v):
         if v is not None:
             parsed_url = urlparse(str(v))  # Convert the URL object to a string before parsing
+            if not parsed_url.scheme or parsed_url.scheme not in ['http', 'https']:
+                raise ValueError("Profile picture URL must start with 'http://' or 'https://'.")
+            if not parsed_url.netloc:
+                raise ValueError("Profile picture URL is missing the domain name.")
+            domain_pattern = r'^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.[a-zA-Z]{2,}$'
+            if not re.match(domain_pattern, parsed_url.netloc):
+                raise ValueError("Profile Picture URL must have a valid domain name.")
             if not re.search(r"\.(jpg|jpeg|png)$", parsed_url.path):
-                raise ValueError("Profile picture URL must point to a valid image file (JPEG, PNG).")
+                raise ValueError("Profile Picture URL must point to a valid image file (JPEG, PNG).")
         return v
 
     class Config:
@@ -185,7 +219,7 @@ class UserUpdate(BaseModel):
             "description": "Model for updating user information.",
             "example": {
                 "email": "john.doe.new@example.com",
-                "full_name": "John H. Doe",
+                "full_name": "John Update Doe",
                 "bio": "I am a senior software engineer specializing in backend development with Python and Node.js.",
                 "profile_picture_url": "https://example.com/profile_pictures/john_doe_updated.jpg"
             }
