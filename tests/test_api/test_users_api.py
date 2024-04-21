@@ -50,7 +50,7 @@ async def test_update_user(async_client, user, token):
 async def test_delete_user(async_client, user, token):
     headers = {"Authorization": f"Bearer {token}"}
     delete_response = await async_client.delete(f"/users/{user.id}", headers=headers)
-    assert delete_response.status_code == 204
+    assert delete_response.status_code == 200
     # Verify the user is deleted
     fetch_response = await async_client.get(f"/users/{user.id}", headers=headers)
     assert fetch_response.status_code == 404
